@@ -172,66 +172,83 @@ async function crawlMule() {
   return out;
 }
 
-export default async function handler(req, res) {
+function sendJson(res, status, body) {
   setCors(res);
-  if (req.method === 'OPTIONS') {
-    return res.status(204).end();
-  }
-  if (req.method !== 'GET' && req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
+  res.status(status);
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.end(JSON.stringify(body));
+}
 
-  let supabase;
+export default async function handler(req, res) {
   try {
-    supabase = getSupabase();
-  } catch (e) {
-    return res.status(500).json({ error: 'Supabase not configured. Vercel 환경 변수에 SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY를 설정하세요.' });
-  }
-
-  let all = [];
-  let crawlError = null;
-  try {
-    all = await crawlMule();
-  } catch (e) {
-    crawlError = e;
-    console.error('Crawl mule error', e);
-  }
-
-  const seen = new Set();
-  const unique = all.filter((i) => {
-    if (seen.has(i.source_url)) return false;
-    seen.add(i.source_url);
-    return true;
-  });
-
-  for (const row of unique) {
-    try {
-      await supabase.from('listings').upsert(
-        {
-          title: row.title,
-          image_url: row.image_url,
-          price: row.price,
-          source_site: row.source_site,
-          source_url: row.source_url,
-          posted_at: row.posted_at || null,
-        },
-        { onConflict: 'source_url' }
-      );
-    } catch (e) {
-      console.error('Upsert error', row.source_url, e);
+    setCors(res);
+    if (req.method === 'OPTIONS') {
+      return res.status(204).end();
     }
+    if (req.method !== 'GET' && req.method !== 'POST') {
+      return sendJson(res, 405, { error: 'Method not allowed' });
+    }
+
+    let supabase;
+    try {
+      supabase = getSupabase();
+    } catch (e) {
+      return sendJson(res, 500, {
+        error: 'Supabase가 설정되지 않았습니다. Vercel 환경 변수에 SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY를 넣어 주세요.',
+      });
+    }
+
+    let all = [];
+    let crawlError = null;
+    try {
+      all = await crawlMule();
+    } catch (e) {
+      crawlError = e;
+      console.error('Crawl mule error', e);
+    }
+
+    const seen = new Set();
+    const unique = all.filter((i) => {
+      if (seen.has(i.source_url)) return false;
+      seen.add(i.source_url);
+      return true;
+    });
+
+    for (const row of unique) {
+      try {
+        const { error } = await supabase.from('listings').upsert(
+          {
+            title: row.title,
+            image_url: row.image_url,
+            price: row.price,
+            source_site: row.source_site,
+            source_url: row.source_url,
+            posted_at: row.posted_at || null,
+          },
+          { onConflict: 'source_url' }
+        );
+        if (error) console.error('Upsert error', row.source_url, error);
+      } catch (e) {
+        console.error('Upsert error', row.source_url, e);
+      }
+    }
+
+    const message =
+      unique.length > 0
+        ? `${unique.length}건 수집 후 DB 반영 완료`
+        : crawlError
+          ? `수집 0건. (원인: ${crawlError.message}). 뮬 사이트 연결이 불가하거나 HTML 구조가 변경되었을 수 있습니다.`
+          : '수집된 매물이 없습니다. 잠시 후 다시 시도하거나, 뮬에서 "왼손" 검색 결과가 있는지 확인해 보세요.';
+
+    return sendJson(res, 200, {
+      ok: true,
+      crawled: unique.length,
+      message,
+    });
+  } catch (e) {
+    console.error('Crawl handler error', e);
+    sendJson(res, 500, {
+      error: e.message || '크롤링 중 서버 오류가 발생했습니다.',
+    });
   }
-
-  const message =
-    unique.length > 0
-      ? `${unique.length}건 수집 후 DB 반영 완료`
-      : crawlError
-        ? `수집 0건. (원인: ${crawlError.message}). 뮬 사이트 연결이 불가하거나 HTML 구조가 변경되었을 수 있습니다.`
-        : '수집된 매물이 없습니다. 잠시 후 다시 시도하거나, 뮬에서 "왼손" 검색 결과가 있는지 확인해 보세요.';
-
-  return res.status(200).json({
-    ok: true,
-    crawled: unique.length,
-    message,
-  });
 }
