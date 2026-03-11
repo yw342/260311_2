@@ -3,7 +3,8 @@ import { setCors } from '../lib/res.js';
 import * as cheerio from 'cheerio';
 
 const BASE = 'https://www.mule.co.kr';
-const MULE_SEARCH = `${BASE}/bbs/market`;
+const MULE_MARKET = `${BASE}/bbs/market`;
+const MULE_MARKET_SELL = `${BASE}/bbs/market/sell`;
 const MULE_IN = `${BASE}/bbs/community/mulein`;
 const FETCH_TIMEOUT_MS = 5500;
 const CORS_PROXY = 'https://corsproxy.io/?url=';
@@ -48,7 +49,49 @@ async function fetchMulePage(url, useProxy = false) {
   }
 }
 
+/** 뮬 악기장터/뮬인: 링크 목록 형태 [가격+제목](url) 에 맞춰 추출 */
+function extractMuleListFromLinks(html, sourceLabel) {
+  const $ = cheerio.load(html, { decodeEntities: false });
+  const items = [];
+  const seen = new Set();
+  $('a[href*="idx="]').each((_, el) => {
+    const $a = $(el);
+    let href = $a.attr('href');
+    if (!href || !href.includes('idx=')) return;
+    href = href.replace(/&amp;/g, '&');
+    const link = href.startsWith('http') ? href : new URL(href, BASE).href;
+    if (!link.includes('mule.co.kr/bbs/')) return;
+    if (seen.has(link)) return;
+    seen.add(link);
+    const rawText = $a.text().trim().replace(/\s+/g, ' ');
+    if (!rawText || rawText.length < 2) return;
+    const priceMatch = rawText.match(/^([\d.,]+(?:만원|원)|-\s*)/);
+    const price = priceMatch ? priceMatch[1].trim() : parsePrice(rawText) || null;
+    const title = priceMatch ? rawText.slice(priceMatch[0].length).trim() : rawText;
+    const finalTitle = title.replace(/\s*\[\d+\]\s*$/, '').trim() || rawText;
+    items.push({
+      title: finalTitle,
+      image_url: null,
+      price,
+      source_site: sourceLabel,
+      source_url: link,
+      posted_at: null,
+    });
+  });
+  return items;
+}
+
+/** 왼손/레프티 관련만 필터 (제목에 키워드 포함) */
+const LEFTY_KEYWORDS = /왼손|레프티|lefty|좌손/i;
+function filterLeftyOnly(items) {
+  return items.filter((i) => LEFTY_KEYWORDS.test(i.title));
+}
+
 function extractMuleList(html, sourceLabel) {
+  const fromLinks = extractMuleListFromLinks(html, sourceLabel);
+  if (fromLinks.length > 0) {
+    return filterLeftyOnly(fromLinks);
+  }
   const $ = cheerio.load(html);
   const items = [];
   const rows = $('table tbody tr, .board-list tr, .list-item, [class*="list"] tr, .market-list tr').toArray();
@@ -57,11 +100,11 @@ function extractMuleList(html, sourceLabel) {
     const $a = $tr.find('a[href*="idx="], a[href*="/bbs/"]').first();
     const href = $a.attr('href');
     if (!href) continue;
-    const link = href.startsWith('http') ? href : new URL(href, BASE).href;
+    const link = (href.startsWith('http') ? href : new URL(href.replace(/&amp;/g, '&'), BASE).href;
     const title = $a.text().trim() || $tr.find('.title, .subject, td').first().text().trim();
     if (!title || title.length < 2) continue;
     const priceEl = $tr.find('.price, [class*="price"], td:nth-child(3), td:nth-child(4)');
-    const price = parsePrice(priceEl.length ? priceEl.first().text() : '');
+    const price = parsePrice(priceEl.length ? priceEl.first().text() : '') || parsePrice(title);
     const dateEl = $tr.find('.date, .wdate, [class*="date"]');
     const rawDate = dateEl.length ? dateEl.first().text() : '';
     const postedAt = parseDate(rawDate);
@@ -77,44 +120,51 @@ function extractMuleList(html, sourceLabel) {
     });
   }
   if (items.length === 0) {
-    const links = $('a[href*="idx="]').toArray();
-    for (const a of links.slice(0, 30)) {
+    $('a[href*="idx="]').each((_, a) => {
       const $a = $(a);
-      const href = $a.attr('href');
-      const title = $a.text().trim();
-      if (!href || !title || title.length < 2) continue;
+      let href = $a.attr('href');
+      if (!href) return;
+      href = href.replace(/&amp;/g, '&');
       const link = href.startsWith('http') ? href : new URL(href, BASE).href;
-      const row = $a.closest('tr');
-      const price = parsePrice(row.find('td').eq(2).text() || row.find('.price').text());
-      const rawDate = row.find('.date, .wdate, td').last().text();
+      const title = $a.text().trim().replace(/\s*\[\d+\]\s*$/, '');
+      if (!title || title.length < 2) return;
       items.push({
         title,
-        image_url: row.find('img').attr('src') ? new URL(row.find('img').attr('src'), BASE).href : null,
-        price,
+        image_url: null,
+        price: parsePrice(title) || null,
         source_site: sourceLabel,
         source_url: link,
-        posted_at: parseDate(rawDate),
+        posted_at: null,
       });
-    }
+    });
   }
-  return items;
+  return filterLeftyOnly(items);
 }
 
 async function crawlMule() {
   const out = [];
   const q = '왼손';
   const urls = [
-    `${MULE_SEARCH}?qs=${encodeURIComponent(q)}&page=1&of=wdate&od=desc`,
-    `${MULE_IN}?qs=${encodeURIComponent(q)}&page=1&of=wdate&od=desc&mode=list`,
+    `${MULE_MARKET}?qs=${encodeURIComponent(q)}&page=1`,
+    `${MULE_MARKET_SELL}?qs=${encodeURIComponent(q)}&page=1`,
+    `${MULE_MARKET}?page=1`,
+    `${MULE_MARKET_SELL}?page=1`,
+    `${MULE_IN}?qs=${encodeURIComponent(q)}&page=1&mode=list`,
   ];
+  const seen = new Set();
   for (const url of urls) {
     for (const useProxy of [false, true]) {
       try {
         const html = await fetchMulePage(url, useProxy);
-        if (html && html.length > 500) {
+        if (html && html.length > 1000) {
           const list = extractMuleList(html, '뮬(mule)');
-          list.forEach((i) => out.push(i));
-          if (list.length > 0) return out;
+          for (const i of list) {
+            if (!seen.has(i.source_url)) {
+              seen.add(i.source_url);
+              out.push(i);
+            }
+          }
+          if (out.length >= 20) return out;
         }
       } catch (_) {}
     }

@@ -17,22 +17,11 @@ create index if not exists idx_listings_source_url on listings(source_url);
 create index if not exists idx_listings_posted_at on listings(posted_at desc);
 create index if not exists idx_listings_source_site on listings(source_site);
 
--- RLS: 익명 읽기 허용 (공개 리스트업)
+-- RLS: 익명(anon)은 읽기만, 쓰기는 service_role만 (크롤 API에서 service_role 사용)
 alter table listings enable row level security;
 
 create policy "Allow public read"
   on listings for select
   using (true);
 
--- 크롤러 API만 쓰려면 service_role 키 사용 권장. 쓰기 정책은 필요 시 추가.
-create policy "Allow insert for service"
-  on listings for insert
-  with check (true);
-
-create policy "Allow update for service"
-  on listings for update
-  using (true);
-
-create policy "Allow delete for service"
-  on listings for delete
-  using (true);
+-- insert/update/delete 정책 없음 → anon 키로는 쓰기 불가, service_role 키는 RLS 우회로 쓰기 가능

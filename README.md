@@ -14,10 +14,9 @@
 
 ## 수동 작업 (필수)
 
-1. **Supabase**
-   - [Supabase](https://supabase.com)에서 새 프로젝트 생성
-   - SQL Editor에서 `supabase/schema.sql` 내용 복사 후 실행
-   - Project Settings > API에서 `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` 복사
+1. **Supabase 연동**  
+   → **[SUPABASE_SETUP.md](./SUPABASE_SETUP.md)** 에 따라 진행 (프로젝트 생성 → schema.sql 실행 → API 키 복사 → Vercel 환경 변수 설정).  
+   연동 후 `https://your-app.vercel.app/api/health` 로 연결 여부 확인 가능.
 
 2. **Vercel**
    - [Vercel](https://vercel.com)에서 이 저장소 연결 후 배포
