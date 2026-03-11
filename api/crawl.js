@@ -195,8 +195,12 @@ export default {
             : '수집된 매물이 없습니다. 잠시 후 다시 시도해 보세요.';
 
       const body = { ok: true, crawled: unique.length, message };
-      if (unique.length === 0 && lastHtmlLength > 0) {
-        body.debug = { htmlLength: lastHtmlLength, snippet: lastSnippet };
+      if (unique.length === 0) {
+        body.debug = {
+          htmlLength: lastHtmlLength,
+          snippet: lastSnippet || '(없음)',
+          fetchError: err ? (err.message || String(err)) : null,
+        };
       }
       return json(body, 200);
     } catch (e) {
