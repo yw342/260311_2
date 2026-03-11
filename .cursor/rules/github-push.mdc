@@ -1,0 +1,14 @@
+---
+description: 작업 완료 시 GitHub에 자동 반영
+alwaysApply: true
+---
+
+# GitHub 반영
+
+- 이 프로젝트에서 **파일을 수정·추가·삭제한 작업을 마친 뒤**에는 반드시 GitHub에 반영한다.
+- 순서:
+  1. `git add -A`
+  2. 의미 있는 커밋 메시지로 `git commit`
+  3. `git push` (필요 시 `origin main`)
+- 푸시 실패 시 권한(`all` 등)을 요청해 재시도한다.
+- 사용자가 "푸시하지 마" 등으로 명시한 경우에는 푸시하지 않는다.

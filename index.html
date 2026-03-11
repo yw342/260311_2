@@ -4,116 +4,184 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>중고 왼손 기타 매물</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg: #0f0f12;
-      --card: #1a1a1f;
-      --text: #e8e6e3;
-      --muted: #888;
-      --accent: #c9a227;
-      --link: #7eb8da;
+      --bg: #f5f5f5;
+      --surface: #ffffff;
+      --text: #111111;
+      --text-secondary: #6b6b6b;
+      --border: #e0e0e0;
+      --focus: #111111;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      font-family: 'Pretendard', 'Malgun Gothic', sans-serif;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
       background: var(--bg);
       color: var(--text);
       min-height: 100vh;
       line-height: 1.5;
+      font-size: 15px;
+      -webkit-font-smoothing: antialiased;
+    }
+    .layout {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 24px;
     }
     header {
-      padding: 1.5rem 1rem;
-      border-bottom: 1px solid rgba(255,255,255,.06);
+      padding: 48px 0 32px;
+      border-bottom: 1px solid var(--border);
+    }
+    header .layout {
       display: flex;
       align-items: center;
       justify-content: space-between;
       flex-wrap: wrap;
-      gap: 1rem;
+      gap: 24px;
     }
-    h1 { margin: 0; font-size: 1.35rem; font-weight: 600; color: var(--accent); }
-    .actions { display: flex; gap: .75rem; align-items: center; }
-    button {
-      background: var(--card);
+    h1 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
       color: var(--text);
-      border: 1px solid rgba(255,255,255,.12);
-      padding: .5rem 1rem;
-      border-radius: 8px;
+    }
+    .actions { display: flex; gap: 12px; align-items: center; }
+    button {
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      padding: 10px 20px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
       cursor: pointer;
-      font-size: .9rem;
+      border-radius: 0;
+      transition: border-color .15s, background .15s;
     }
-    button:hover { background: #252530; }
-    button.primary { background: var(--accent); color: #0f0f12; border-color: var(--accent); }
-    button.primary:hover { filter: brightness(1.1); }
-    main {
-      max-width: 1100px;
-      margin: 0 auto;
-      padding: 1.5rem 1rem 2rem;
+    button:hover {
+      border-color: var(--text);
+      background: var(--bg);
     }
+    button.primary {
+      background: var(--text);
+      color: var(--surface);
+      border-color: var(--text);
+    }
+    button.primary:hover {
+      background: #333;
+      border-color: #333;
+    }
+    button:disabled { opacity: .6; cursor: not-allowed; }
+    main { padding: 48px 0 64px; }
     .list {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-      gap: 1.25rem;
+      gap: 1px;
+      background: var(--border);
     }
     .card {
-      background: var(--card);
-      border-radius: 12px;
-      overflow: hidden;
-      border: 1px solid rgba(255,255,255,.06);
+      background: var(--surface);
       display: flex;
       flex-direction: column;
+      overflow: hidden;
     }
-    .card a { color: inherit; text-decoration: none; display: flex; flex-direction: column; flex: 1; }
-    .card a:hover { color: var(--link); }
+    .card a {
+      color: inherit;
+      text-decoration: none;
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      padding: 24px;
+      transition: background .12s;
+    }
+    .card a:hover { background: var(--bg); }
     .thumb {
       aspect-ratio: 4/3;
-      background: #252530;
+      background: var(--bg);
       object-fit: cover;
       width: 100%;
+      margin: -24px -24px 0;
+      width: calc(100% + 48px);
+      max-width: none;
     }
     .no-img {
       aspect-ratio: 4/3;
-      background: #252530;
+      background: var(--bg);
+      margin: -24px -24px 0;
+      width: calc(100% + 48px);
+      max-width: none;
       display: flex;
       align-items: center;
       justify-content: center;
-      color: var(--muted);
-      font-size: .85rem;
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
     }
-    .body { padding: 1rem; flex: 1; }
-    .card h2 { margin: 0 0 .5rem; font-size: 1rem; font-weight: 600; line-height: 1.35; }
-    .price { color: var(--accent); font-weight: 600; margin-bottom: .35rem; }
-    .meta { font-size: .8rem; color: var(--muted); }
-    .meta span { margin-right: .5rem; }
+    .body { flex: 1; }
+    .card h2 {
+      margin: 0 0 8px;
+      font-size: 14px;
+      font-weight: 500;
+      line-height: 1.4;
+      letter-spacing: -0.01em;
+    }
+    .price {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 12px;
+    }
+    .meta {
+      font-size: 11px;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .meta span { margin-right: 0; }
+    .meta span + span::before { content: " · "; margin: 0 .25em; }
     .loading, .empty, .error {
       text-align: center;
-      padding: 3rem 1rem;
-      color: var(--muted);
+      padding: 80px 24px;
+      color: var(--text-secondary);
+      font-size: 14px;
     }
-    .error { color: #e07070; }
+    .error { color: var(--text); }
     footer {
+      border-top: 1px solid var(--border);
+      padding: 32px 0;
+      font-size: 11px;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
       text-align: center;
-      padding: 1.5rem;
-      font-size: .85rem;
-      color: var(--muted);
-      border-top: 1px solid rgba(255,255,255,.06);
     }
   </style>
 </head>
 <body>
   <header>
-    <h1>🎸 중고 왼손 기타 매물</h1>
-    <div class="actions">
-      <button type="button" id="btnRefresh">새로고침</button>
-      <button type="button" class="primary" id="btnCrawl">크롤링 실행</button>
+    <div class="layout">
+      <h1>왼손 기타 매물</h1>
+      <div class="actions">
+        <button type="button" id="btnRefresh">새로고침</button>
+        <button type="button" class="primary" id="btnCrawl">크롤링 실행</button>
+      </div>
     </div>
   </header>
   <main>
-    <div id="state" class="loading">불러오는 중…</div>
-    <div id="list" class="list" style="display:none;"></div>
+    <div class="layout">
+      <div id="state" class="loading">불러오는 중…</div>
+      <div id="list" class="list" style="display:none;"></div>
+    </div>
   </main>
   <footer>
-    출처: 뮬(mule) 등 | 데이터는 수집 시점 기준이며, 거래 시 원문을 확인하세요.
+    <div class="layout">뮬(mule) 등 수집 · 거래 시 원문 확인 필요</div>
   </footer>
   <script>
     const listEl = document.getElementById('list');
