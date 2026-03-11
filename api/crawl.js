@@ -3,6 +3,13 @@
  */
 const BASE = 'https://www.mule.co.kr';
 const CORS_PROXY = 'https://corsproxy.io/?url=';
+
+/** 뮬 악기장터 '왼손' 검색 + 일렉기타 카테고리 (실제 검색 URL) */
+const MULE_LEFTY_SEARCH =
+  BASE + '/bbs/market/sell?page=1&map=list&mode=list&region=&start_price=&end_price=&qf=title&qs=' +
+  encodeURIComponent('왼손') +
+  '&category=&ct1=' + encodeURIComponent('일렉기타') + '&ct2=' + encodeURIComponent('일렉기타') +
+  '&ct3=&store=&options=&soldout=&sell_status=&sido=&gugun=&dong=&period=&of=wdate&od=&andor=and&v=l';
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -118,13 +125,12 @@ export default {
       }
 
       const supabase = createClient(url, key);
-      const crawlUrl = `${BASE}/bbs/market?qs=${encodeURIComponent('왼손')}&page=1`;
       let all = [];
       let err = null;
 
       for (const useProxy of [false, true]) {
         try {
-          const html = await fetchOne(crawlUrl, useProxy);
+          const html = await fetchOne(MULE_LEFTY_SEARCH, useProxy);
           if (html && html.length > 500) {
             all = extractLinks(html, '뮬(mule)');
             if (all.length > 0) break;
