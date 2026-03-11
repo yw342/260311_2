@@ -72,9 +72,20 @@ function extractLinks(html, sourceLabel) {
   }
   if (items.length > 0) return items;
 
-  // 전략 3: 페이지 어디든 market/sell...idx=숫자 등장하면 URL 생성 (SPA/다른 구조 대비)
+  // 전략 3: market/sell...idx=숫자
   const idxRe = /(?:market\/sell|sell\?)[^"'\s]*idx=(\d+)/gi;
   while ((m = idxRe.exec(html)) !== null) {
+    const id = m[1];
+    const link = `${SELL_BASE}?v=v&idx=${id}&page=&qf=&q=`;
+    if (seen.has(link)) continue;
+    seen.add(link);
+    items.push({ title: `뮬 매물 #${id}`, image_url: null, price: null, source_site: sourceLabel, source_url: link, posted_at: null });
+  }
+  if (items.length > 0) return items;
+
+  // 전략 4: HTML 어디든 idx=숫자(5~8자리) 등장하면 매물로 간주 (게시글 ID 패턴)
+  const anyIdxRe = /idx=(\d{5,8})(?=[&\s"'\n>]|$)/g;
+  while ((m = anyIdxRe.exec(html)) !== null) {
     const id = m[1];
     const link = `${SELL_BASE}?v=v&idx=${id}&page=&qf=&q=`;
     if (seen.has(link)) continue;
@@ -84,13 +95,22 @@ function extractLinks(html, sourceLabel) {
   return items;
 }
 
+const BROWSER_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+  'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+  Referer: BASE + '/',
+  'Cache-Control': 'no-cache',
+  Pragma: 'no-cache',
+};
+
 async function fetchOne(url, useProxy = false) {
   const target = useProxy ? CORS_PROXY + encodeURIComponent(url) : url;
   const c = new AbortController();
-  const t = setTimeout(() => c.abort(), 4000);
+  const t = setTimeout(() => c.abort(), 8000);
   try {
     const r = await fetch(target, {
-      headers: useProxy ? {} : { 'User-Agent': 'Mozilla/5.0', Accept: 'text/html', 'Accept-Language': 'ko-KR,ko;q=0.9' },
+      headers: useProxy ? {} : BROWSER_HEADERS,
       signal: c.signal,
     });
     if (!r.ok) return null;
@@ -127,11 +147,15 @@ export default {
       const supabase = createClient(url, key);
       let all = [];
       let err = null;
+      let lastHtmlLength = 0;
+      let lastSnippet = '';
 
       for (const useProxy of [false, true]) {
         try {
           const html = await fetchOne(MULE_LEFTY_SEARCH, useProxy);
-          if (html && html.length > 500) {
+          if (html && html.length > 100) {
+            lastHtmlLength = html.length;
+            lastSnippet = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
             all = extractLinks(html, '뮬(mule)');
             if (all.length > 0) break;
           }
@@ -170,7 +194,11 @@ export default {
             ? `수집 0건. (${err.message || err}). 뮬 연결 불가 또는 응답 구조 변경 가능.`
             : '수집된 매물이 없습니다. 잠시 후 다시 시도해 보세요.';
 
-      return json({ ok: true, crawled: unique.length, message }, 200);
+      const body = { ok: true, crawled: unique.length, message };
+      if (unique.length === 0 && lastHtmlLength > 0) {
+        body.debug = { htmlLength: lastHtmlLength, snippet: lastSnippet };
+      }
+      return json(body, 200);
     } catch (e) {
       return json({ error: (e && e.message) || String(e) || '서버 오류' }, 500);
     }
