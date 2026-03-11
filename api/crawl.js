@@ -1,4 +1,4 @@
-// 의존성 없음: lib 미사용, cheerio·supabase는 핸들러 내 동적 import
+// Vercel Web Handler: Request → Response (JSON 항상 반환)
 
 const BASE = 'https://www.mule.co.kr';
 const MULE_MARKET = `${BASE}/bbs/market`;
@@ -6,6 +6,22 @@ const MULE_MARKET_SELL = `${BASE}/bbs/market/sell`;
 const MULE_IN = `${BASE}/bbs/community/mulein`;
 const FETCH_TIMEOUT_MS = 5500;
 const CORS_PROXY = 'https://corsproxy.io/?url=';
+
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+};
+
+function jsonResponse(body, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      ...CORS_HEADERS,
+    },
+  });
+}
 
 function parsePrice(text) {
   if (!text) return null;
@@ -164,123 +180,95 @@ async function crawlMule(load) {
   return out;
 }
 
-function send(res, status, body) {
-  const json = JSON.stringify(body);
+async function runCrawl(request) {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+  if (!url || !key) {
+    return jsonResponse(
+      { error: 'Supabase가 설정되지 않았습니다. Vercel 환경 변수에 SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY를 넣어 주세요.' },
+      500
+    );
+  }
+
+  let createClient;
   try {
-    if (typeof res.setHeader === 'function') {
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-      res.setHeader('Content-Type', 'application/json; charset=utf-8');
-      res.statusCode = status;
-      res.end(json);
-      return;
+    const supabaseMod = await import('@supabase/supabase-js');
+    createClient = supabaseMod.createClient;
+  } catch (e) {
+    return jsonResponse(
+      { error: 'Supabase 클라이언트 로드 실패. ' + (e && e.message ? e.message : '') },
+      500
+    );
+  }
+
+  let load;
+  try {
+    const cheerioMod = await import('cheerio');
+    load = cheerioMod.load || cheerioMod.default;
+  } catch (e) {
+    return jsonResponse(
+      { error: 'cheerio 로드 실패. ' + (e && e.message ? e.message : '') },
+      500
+    );
+  }
+
+  const supabase = createClient(url, key);
+  let all = [];
+  let crawlError = null;
+  try {
+    all = await crawlMule(load);
+  } catch (e) {
+    crawlError = e;
+    console.error('Crawl mule error', e);
+  }
+
+  const seen = new Set();
+  const unique = all.filter((i) => {
+    if (seen.has(i.source_url)) return false;
+    seen.add(i.source_url);
+    return true;
+  });
+
+  for (const row of unique) {
+    try {
+      const { error } = await supabase.from('listings').upsert(
+        {
+          title: row.title,
+          image_url: row.image_url,
+          price: row.price,
+          source_site: row.source_site,
+          source_url: row.source_url,
+          posted_at: row.posted_at || null,
+        },
+        { onConflict: 'source_url' }
+      );
+      if (error) console.error('Upsert error', row.source_url, error);
+    } catch (e) {
+      console.error('Upsert error', row.source_url, e);
     }
-    if (typeof res.status === 'function') {
-      res.status(status).json(body);
-      return;
-    }
-  } catch (_) {}
-  res.statusCode = status;
-  res.end(json);
+  }
+
+  const message =
+    unique.length > 0
+      ? `${unique.length}건 수집 후 DB 반영 완료`
+      : crawlError
+        ? `수집 0건. (원인: ${crawlError.message}). 뮬 사이트 연결이 불가하거나 HTML 구조가 변경되었을 수 있습니다.`
+        : '수집된 매물이 없습니다. 잠시 후 다시 시도하거나, 뮬에서 "왼손" 검색 결과가 있는지 확인해 보세요.';
+
+  return jsonResponse({ ok: true, crawled: unique.length, message }, 200);
 }
 
-export default async function handler(req, res) {
-  try {
-    if (req.method === 'OPTIONS') {
-      if (typeof res.setHeader === 'function') {
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-      }
-      if (typeof res.status === 'function') res.status(204).end();
-      else {
-        res.statusCode = 204;
-        res.end();
-      }
-      return;
-    }
-    if (req.method !== 'GET' && req.method !== 'POST') {
-      send(res, 405, { error: 'Method not allowed' });
-      return;
-    }
+export async function GET(request) {
+  return runCrawl(request);
+}
 
-    const url = process.env.SUPABASE_URL;
-    const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
-    if (!url || !key) {
-      send(res, 500, {
-        error: 'Supabase가 설정되지 않았습니다. Vercel 환경 변수에 SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY를 넣어 주세요.',
-      });
-      return;
-    }
+export async function POST(request) {
+  return runCrawl(request);
+}
 
-    let createClient;
-    try {
-      const supabaseMod = await import('@supabase/supabase-js');
-      createClient = supabaseMod.createClient;
-    } catch (e) {
-      send(res, 500, { error: 'Supabase 클라이언트 로드 실패. ' + (e && e.message ? e.message : '') });
-      return;
-    }
-
-    let load;
-    try {
-      const cheerioMod = await import('cheerio');
-      load = cheerioMod.load || cheerioMod.default;
-    } catch (e) {
-      send(res, 500, { error: 'cheerio 로드 실패. ' + (e && e.message ? e.message : '') });
-      return;
-    }
-
-    const supabase = createClient(url, key);
-
-    let all = [];
-    let crawlError = null;
-    try {
-      all = await crawlMule(load);
-    } catch (e) {
-      crawlError = e;
-      console.error('Crawl mule error', e);
-    }
-
-    const seen = new Set();
-    const unique = all.filter((i) => {
-      if (seen.has(i.source_url)) return false;
-      seen.add(i.source_url);
-      return true;
-    });
-
-    for (const row of unique) {
-      try {
-        const { error } = await supabase.from('listings').upsert(
-          {
-            title: row.title,
-            image_url: row.image_url,
-            price: row.price,
-            source_site: row.source_site,
-            source_url: row.source_url,
-            posted_at: row.posted_at || null,
-          },
-          { onConflict: 'source_url' }
-        );
-        if (error) console.error('Upsert error', row.source_url, error);
-      } catch (e) {
-        console.error('Upsert error', row.source_url, e);
-      }
-    }
-
-    const message =
-      unique.length > 0
-        ? `${unique.length}건 수집 후 DB 반영 완료`
-        : crawlError
-          ? `수집 0건. (원인: ${crawlError.message}). 뮬 사이트 연결이 불가하거나 HTML 구조가 변경되었을 수 있습니다.`
-          : '수집된 매물이 없습니다. 잠시 후 다시 시도하거나, 뮬에서 "왼손" 검색 결과가 있는지 확인해 보세요.';
-
-    send(res, 200, { ok: true, crawled: unique.length, message });
-  } catch (e) {
-    console.error('Crawl handler error', e);
-    send(res, 500, {
-      error: (e && e.message ? e.message : String(e)) || '크롤링 중 서버 오류가 발생했습니다.',
-    });
-  }
+export async function OPTIONS() {
+  return new Response(null, {
+    status: 204,
+    headers: CORS_HEADERS,
+  });
 }
