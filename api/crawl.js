@@ -96,6 +96,41 @@ function extractLinks(html, sourceLabel) {
     seen.add(link);
     items.push({ title: `뮬 매물 #${id}`, image_url: null, price: null, source_site: sourceLabel, source_url: link, posted_at: null });
   }
+  if (items.length > 0) return items;
+
+  // 전략 5: JSON/스크립트 내 "idx":12345 또는 "idx":"12345" (SPA 초기 데이터)
+  const jsonIdxRe = /["']idx["']\s*:\s*["']?(\d{5,8})["']?/g;
+  while ((m = jsonIdxRe.exec(html)) !== null) {
+    const id = m[1];
+    const link = `${SELL_BASE}?v=v&idx=${id}&page=&qf=&q=`;
+    if (seen.has(link)) continue;
+    seen.add(link);
+    items.push({ title: `뮬 매물 #${id}`, image_url: null, price: null, source_site: sourceLabel, source_url: link, posted_at: null });
+  }
+  if (items.length > 0) return items;
+
+  // 전략 6: href가 상대경로만 있을 때 (예: ?v=v&idx=12345) → sell URL로 보정
+  const hrefRelRe = /href\s*=\s*["']([^"']*idx=(\d+)[^"']*)["']/gi;
+  while ((m = hrefRelRe.exec(html)) !== null) {
+    let href = m[1].replace(/&amp;/g, '&').replace(/&#38;/g, '&');
+    const id = m[2];
+    let link = href.startsWith('http') ? href : new URL(href.startsWith('/') ? href : '/bbs/market/sell?' + (href.includes('?') ? href.replace(/^[^?]*\?/, '') : 'v=v&idx=' + id), BASE).href;
+    if (!link.includes('/bbs/market/sell')) link = `${SELL_BASE}?v=v&idx=${id}&page=&qf=&q=`;
+    if (seen.has(link)) continue;
+    seen.add(link);
+    items.push({ title: `뮬 매물 #${id}`, image_url: null, price: null, source_site: sourceLabel, source_url: link, posted_at: null });
+  }
+  if (items.length > 0) return items;
+
+  // 전략 7: data-idx="12345" (SPA/컴포넌트)
+  const dataIdxRe = /data-idx\s*=\s*["'](\d{5,8})["']/gi;
+  while ((m = dataIdxRe.exec(html)) !== null) {
+    const id = m[1];
+    const link = `${SELL_BASE}?v=v&idx=${id}&page=&qf=&q=`;
+    if (seen.has(link)) continue;
+    seen.add(link);
+    items.push({ title: `뮬 매물 #${id}`, image_url: null, price: null, source_site: sourceLabel, source_url: link, posted_at: null });
+  }
   return items;
 }
 
