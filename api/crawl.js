@@ -1,5 +1,4 @@
-import { getSupabase } from '../lib/supabase.js';
-import { setCors } from '../lib/res.js';
+// 의존성 없음: lib 미사용, cheerio·supabase는 핸들러 내 동적 import
 
 const BASE = 'https://www.mule.co.kr';
 const MULE_MARKET = `${BASE}/bbs/market`;
@@ -34,23 +33,21 @@ async function fetchMulePage(url, useProxy = false) {
       headers: useProxy
         ? {}
         : {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             Accept: 'text/html,application/xhtml+xml',
-            'Accept-Language': 'ko-KR,ko;q=0.9,en;q=0.8',
+            'Accept-Language': 'ko-KR,ko;q=0.9',
           },
       signal: controller.signal,
     });
     if (!res.ok) return null;
-    const text = await res.text();
-    return text;
+    return await res.text();
   } finally {
     clearTimeout(to);
   }
 }
 
-/** 뮬 악기장터/뮬인: 링크 목록 형태 [가격+제목](url) 에 맞춰 추출 */
-function extractMuleListFromLinks(html, sourceLabel, cheerio) {
-  const $ = cheerio.load(html, { decodeEntities: false });
+function extractMuleListFromLinks(html, sourceLabel, load) {
+  const $ = load(html, { decodeEntities: false });
   const items = [];
   const seen = new Set();
   $('a[href*="idx="]').each((_, el) => {
@@ -80,18 +77,15 @@ function extractMuleListFromLinks(html, sourceLabel, cheerio) {
   return items;
 }
 
-/** 왼손/레프티 관련만 필터 (제목에 키워드 포함) */
 const LEFTY_KEYWORDS = /왼손|레프티|lefty|좌손/i;
 function filterLeftyOnly(items) {
   return items.filter((i) => LEFTY_KEYWORDS.test(i.title));
 }
 
-function extractMuleList(html, sourceLabel, cheerio) {
-  const fromLinks = extractMuleListFromLinks(html, sourceLabel, cheerio);
-  if (fromLinks.length > 0) {
-    return filterLeftyOnly(fromLinks);
-  }
-  const $ = cheerio.load(html);
+function extractMuleList(html, sourceLabel, load) {
+  const fromLinks = extractMuleListFromLinks(html, sourceLabel, load);
+  if (fromLinks.length > 0) return filterLeftyOnly(fromLinks);
+  const $ = load(html);
   const items = [];
   const rows = $('table tbody tr, .board-list tr, .list-item, [class*="list"] tr, .market-list tr').toArray();
   for (const tr of rows) {
@@ -105,8 +99,7 @@ function extractMuleList(html, sourceLabel, cheerio) {
     const priceEl = $tr.find('.price, [class*="price"], td:nth-child(3), td:nth-child(4)');
     const price = parsePrice(priceEl.length ? priceEl.first().text() : '') || parsePrice(title);
     const dateEl = $tr.find('.date, .wdate, [class*="date"]');
-    const rawDate = dateEl.length ? dateEl.first().text() : '';
-    const postedAt = parseDate(rawDate);
+    const postedAt = parseDate(dateEl.length ? dateEl.first().text() : '');
     const img = $tr.find('img[src]').first().attr('src');
     const imageUrl = img ? (img.startsWith('http') ? img : new URL(img, BASE).href) : null;
     items.push({
@@ -140,7 +133,7 @@ function extractMuleList(html, sourceLabel, cheerio) {
   return filterLeftyOnly(items);
 }
 
-async function crawlMule(cheerio) {
+async function crawlMule(load) {
   const out = [];
   const q = '왼손';
   const urls = [
@@ -156,7 +149,7 @@ async function crawlMule(cheerio) {
       try {
         const html = await fetchMulePage(url, useProxy);
         if (html && html.length > 1000) {
-          const list = extractMuleList(html, '뮬(mule)', cheerio);
+          const list = extractMuleList(html, '뮬(mule)', load);
           for (const i of list) {
             if (!seen.has(i.source_url)) {
               seen.add(i.source_url);
@@ -171,58 +164,80 @@ async function crawlMule(cheerio) {
   return out;
 }
 
-function sendJson(res, status, body) {
+function send(res, status, body) {
+  const json = JSON.stringify(body);
   try {
     if (typeof res.setHeader === 'function') {
-      setCors(res);
-      res.status(status);
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
-      res.end(JSON.stringify(body));
-    } else {
-      res.status(status).json(body);
+      res.statusCode = status;
+      res.end(json);
+      return;
     }
-  } catch (err) {
-    try {
+    if (typeof res.status === 'function') {
       res.status(status).json(body);
-    } catch (_) {
-      res.status(500).end(JSON.stringify({ error: '응답 전송 실패' }));
+      return;
     }
-  }
+  } catch (_) {}
+  res.statusCode = status;
+  res.end(json);
 }
 
 export default async function handler(req, res) {
   try {
-    setCors(res);
     if (req.method === 'OPTIONS') {
-      return res.status(204).end();
+      if (typeof res.setHeader === 'function') {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      }
+      if (typeof res.status === 'function') res.status(204).end();
+      else {
+        res.statusCode = 204;
+        res.end();
+      }
+      return;
     }
     if (req.method !== 'GET' && req.method !== 'POST') {
-      return sendJson(res, 405, { error: 'Method not allowed' });
+      send(res, 405, { error: 'Method not allowed' });
+      return;
     }
 
-    let supabase;
-    try {
-      supabase = getSupabase();
-    } catch (e) {
-      return sendJson(res, 500, {
+    const url = process.env.SUPABASE_URL;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+    if (!url || !key) {
+      send(res, 500, {
         error: 'Supabase가 설정되지 않았습니다. Vercel 환경 변수에 SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY를 넣어 주세요.',
       });
+      return;
     }
 
-    let cheerio;
+    let createClient;
     try {
-      const mod = await import('cheerio');
-      cheerio = { load: mod.load || mod.default };
+      const supabaseMod = await import('@supabase/supabase-js');
+      createClient = supabaseMod.createClient;
     } catch (e) {
-      return sendJson(res, 500, {
-        error: 'cheerio 로드 실패. ' + (e && e.message ? e.message : ''),
-      });
+      send(res, 500, { error: 'Supabase 클라이언트 로드 실패. ' + (e && e.message ? e.message : '') });
+      return;
     }
+
+    let load;
+    try {
+      const cheerioMod = await import('cheerio');
+      load = cheerioMod.load || cheerioMod.default;
+    } catch (e) {
+      send(res, 500, { error: 'cheerio 로드 실패. ' + (e && e.message ? e.message : '') });
+      return;
+    }
+
+    const supabase = createClient(url, key);
 
     let all = [];
     let crawlError = null;
     try {
-      all = await crawlMule(cheerio);
+      all = await crawlMule(load);
     } catch (e) {
       crawlError = e;
       console.error('Crawl mule error', e);
@@ -261,15 +276,11 @@ export default async function handler(req, res) {
           ? `수집 0건. (원인: ${crawlError.message}). 뮬 사이트 연결이 불가하거나 HTML 구조가 변경되었을 수 있습니다.`
           : '수집된 매물이 없습니다. 잠시 후 다시 시도하거나, 뮬에서 "왼손" 검색 결과가 있는지 확인해 보세요.';
 
-    return sendJson(res, 200, {
-      ok: true,
-      crawled: unique.length,
-      message,
-    });
+    send(res, 200, { ok: true, crawled: unique.length, message });
   } catch (e) {
     console.error('Crawl handler error', e);
-    sendJson(res, 500, {
-      error: e.message || '크롤링 중 서버 오류가 발생했습니다.',
+    send(res, 500, {
+      error: (e && e.message ? e.message : String(e)) || '크롤링 중 서버 오류가 발생했습니다.',
     });
   }
 }
