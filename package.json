@@ -1,0 +1,11 @@
+{
+  "name": "lefty-guitar-listings",
+  "version": "1.0.0",
+  "description": "중고 왼손 기타 매물 크롤링 및 리스트업 웹 서비스",
+  "type": "module",
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "cheerio": "^1.0.0"
+  }
+}
