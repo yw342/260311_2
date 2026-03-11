@@ -39,6 +39,17 @@ npx vercel dev
 
 `.env`에 `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` 설정 후 사용.
 
-## 저장소
+## 저장소 및 배포
 
 - GitHub: https://github.com/yw342/260311_2
+
+### GitHub 푸시 (최초 1회)
+
+로컬에서 이미 `git init` 및 `origin` 설정이 되어 있습니다. 아래만 실행하면 됩니다.
+
+```bash
+cd "c:\Users\SD2-18\Downloads\new"
+git push -u origin main
+```
+
+GitHub 로그인/인증이 필요하면 브라우저 또는 Personal Access Token으로 인증 후 푸시하세요.

@@ -1,15 +1,12 @@
 import { getSupabase } from '../lib/supabase.js';
+import { setCors } from '../lib/res.js';
 import * as cheerio from 'cheerio';
 
 const BASE = 'https://www.mule.co.kr';
 const MULE_SEARCH = `${BASE}/bbs/market`;
 const MULE_IN = `${BASE}/bbs/community/mulein`;
-
-const cors = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-};
+const FETCH_TIMEOUT_MS = 5500;
+const CORS_PROXY = 'https://corsproxy.io/?url=';
 
 function parsePrice(text) {
   if (!text) return null;
@@ -28,17 +25,27 @@ function parseDate(text) {
   return null;
 }
 
-async function fetchMulePage(url) {
-  const res = await fetch(url, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept': 'text/html,application/xhtml+xml',
-      'Accept-Language': 'ko-KR,ko;q=0.9,en;q=0.8',
-    },
-    signal: AbortSignal.timeout(15000),
-  });
-  if (!res.ok) return null;
-  return res.text();
+async function fetchMulePage(url, useProxy = false) {
+  const target = useProxy ? CORS_PROXY + encodeURIComponent(url) : url;
+  const controller = new AbortController();
+  const to = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(target, {
+      headers: useProxy
+        ? {}
+        : {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            Accept: 'text/html,application/xhtml+xml',
+            'Accept-Language': 'ko-KR,ko;q=0.9,en;q=0.8',
+          },
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    const text = await res.text();
+    return text;
+  } finally {
+    clearTimeout(to);
+  }
 }
 
 function extractMuleList(html, sourceLabel) {
@@ -95,48 +102,48 @@ function extractMuleList(html, sourceLabel) {
 
 async function crawlMule() {
   const out = [];
-  const queries = ['왼손', '레프티', 'lefty'];
-  for (const q of queries) {
-    try {
-      const url = `${MULE_SEARCH}?qs=${encodeURIComponent(q)}&page=1&of=wdate&od=desc`;
-      const html = await fetchMulePage(url);
-      if (html) {
-        const list = extractMuleList(html, '뮬(mule)');
-        list.forEach((i) => out.push(i));
-      }
-    } catch (_) {}
-    try {
-      const url2 = `${MULE_IN}?qs=${encodeURIComponent(q)}&page=1&of=wdate&od=desc&mode=list`;
-      const html2 = await fetchMulePage(url2);
-      if (html2) {
-        const list = extractMuleList(html2, '뮬(mule)');
-        list.forEach((i) => out.push(i));
-      }
-    } catch (_) {}
+  const q = '왼손';
+  const urls = [
+    `${MULE_SEARCH}?qs=${encodeURIComponent(q)}&page=1&of=wdate&od=desc`,
+    `${MULE_IN}?qs=${encodeURIComponent(q)}&page=1&of=wdate&od=desc&mode=list`,
+  ];
+  for (const url of urls) {
+    for (const useProxy of [false, true]) {
+      try {
+        const html = await fetchMulePage(url, useProxy);
+        if (html && html.length > 500) {
+          const list = extractMuleList(html, '뮬(mule)');
+          list.forEach((i) => out.push(i));
+          if (list.length > 0) return out;
+        }
+      } catch (_) {}
+    }
   }
   return out;
 }
 
 export default async function handler(req, res) {
+  setCors(res);
   if (req.method === 'OPTIONS') {
     return res.status(204).end();
   }
   if (req.method !== 'GET' && req.method !== 'POST') {
-    return res.setHeaders(cors).status(405).json({ error: 'Method not allowed' });
+    return res.status(405).json({ error: 'Method not allowed' });
   }
 
   let supabase;
   try {
     supabase = getSupabase();
   } catch (e) {
-    return res.setHeaders(cors).status(500).json({ error: 'Supabase not configured' });
+    return res.status(500).json({ error: 'Supabase not configured. Vercel 환경 변수에 SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY를 설정하세요.' });
   }
 
-  const all = [];
+  let all = [];
+  let crawlError = null;
   try {
-    const muleItems = await crawlMule();
-    all.push(...muleItems);
+    all = await crawlMule();
   } catch (e) {
+    crawlError = e;
     console.error('Crawl mule error', e);
   }
 
@@ -165,9 +172,16 @@ export default async function handler(req, res) {
     }
   }
 
-  return res.setHeaders(cors).status(200).json({
+  const message =
+    unique.length > 0
+      ? `${unique.length}건 수집 후 DB 반영 완료`
+      : crawlError
+        ? `수집 0건. (원인: ${crawlError.message}). 뮬 사이트 연결이 불가하거나 HTML 구조가 변경되었을 수 있습니다.`
+        : '수집된 매물이 없습니다. 잠시 후 다시 시도하거나, 뮬에서 "왼손" 검색 결과가 있는지 확인해 보세요.';
+
+  return res.status(200).json({
     ok: true,
     crawled: unique.length,
-    message: `${unique.length}건 수집 후 DB 반영 완료`,
+    message,
   });
 }

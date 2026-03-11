@@ -188,14 +188,18 @@
       try {
         const r = await fetch(API + '/api/crawl', { method: 'POST' });
         const data = await r.json().catch(() => ({}));
-        if (!r.ok) throw new Error(data.error || r.statusText);
+        if (!r.ok) {
+          alert('오류: ' + (data.error || r.statusText));
+          return;
+        }
         alert(data.message || '크롤링 완료');
         await load();
       } catch (e) {
-        alert('크롤링 실패: ' + e.message);
+        alert('연결 실패: ' + e.message + '\n\n인터넷 연결과 Vercel 배포 URL을 확인하세요.');
+      } finally {
+        btnCrawl.disabled = false;
+        btnCrawl.textContent = '크롤링 실행';
       }
-      btnCrawl.disabled = false;
-      btnCrawl.textContent = '크롤링 실행';
     });
 
     load();
