@@ -171,11 +171,21 @@
       <div class="actions">
         <button type="button" id="btnRefresh">새로고침</button>
         <button type="button" class="primary" id="btnCrawl">크롤링 실행</button>
+        <button type="button" id="btnAdd">매물 수동 추가</button>
       </div>
     </div>
   </header>
   <main>
     <div class="layout">
+      <div id="addForm" style="display:none; margin-bottom:24px; padding:20px; background:var(--surface); border:1px solid var(--border);">
+        <div style="font-weight:500; margin-bottom:12px;">매물 수동 추가 (크롤이 안 될 때)</div>
+        <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
+          <input type="url" id="addUrl" placeholder="매물 URL (뮬 등)" style="flex:1; min-width:200px; padding:8px 12px; border:1px solid var(--border); font:inherit;" />
+          <input type="text" id="addTitle" placeholder="제목" style="flex:1; min-width:180px; padding:8px 12px; border:1px solid var(--border); font:inherit;" />
+          <button type="button" id="btnAddSubmit">추가</button>
+          <button type="button" id="btnAddCancel">취소</button>
+        </div>
+      </div>
       <div id="state" class="loading">불러오는 중…</div>
       <div id="list" class="list" style="display:none;"></div>
     </div>
@@ -188,6 +198,12 @@
     const stateEl = document.getElementById('state');
     const btnRefresh = document.getElementById('btnRefresh');
     const btnCrawl = document.getElementById('btnCrawl');
+    const btnAdd = document.getElementById('btnAdd');
+    const addForm = document.getElementById('addForm');
+    const addUrl = document.getElementById('addUrl');
+    const addTitle = document.getElementById('addTitle');
+    const btnAddSubmit = document.getElementById('btnAddSubmit');
+    const btnAddCancel = document.getElementById('btnAddCancel');
 
     const API = window.location.origin;
     let lastCrawlDebug = null;
@@ -204,8 +220,10 @@
         let msg = '등록된 매물이 없습니다. "크롤링 실행"을 눌러 수집해 보세요.';
         if (lastCrawlDebug) {
           msg += '<div class="debug-box" style="margin-top:16px;padding:12px;background:#f0f0f0;font-size:12px;white-space:pre-wrap;text-align:left;">[마지막 크롤 디버그] 수신 길이: ' + (lastCrawlDebug.htmlLength || 0) + '자' +
+            (lastCrawlDebug.triedProxies ? '\n시도한 프록시: ' + escapeHtml(lastCrawlDebug.triedProxies) : '') +
             (lastCrawlDebug.fetchError ? '\n연결 오류: ' + escapeHtml(lastCrawlDebug.fetchError) : '') +
             (lastCrawlDebug.snippet && lastCrawlDebug.snippet !== '(없음)' ? '\n처음 200자: ' + escapeHtml(lastCrawlDebug.snippet) : '') + '</div>';
+          msg += '<p style="margin-top:12px;">크롤이 되지 않으면 <strong>매물 수동 추가</strong>로 URL과 제목을 입력해 보세요.</p>';
         }
         setState(msg);
         return;
@@ -257,6 +275,41 @@
     }
 
     btnRefresh.addEventListener('click', load);
+    btnAdd.addEventListener('click', () => {
+      addForm.style.display = 'block';
+      addUrl.value = '';
+      addTitle.value = '';
+      addUrl.focus();
+    });
+    btnAddCancel.addEventListener('click', () => { addForm.style.display = 'none'; });
+    btnAddSubmit.addEventListener('click', async () => {
+      const url = addUrl.value.trim();
+      const title = addTitle.value.trim();
+      if (!url || !title) {
+        alert('URL과 제목을 모두 입력해 주세요.');
+        return;
+      }
+      btnAddSubmit.disabled = true;
+      try {
+        const r = await fetch(API + '/api/add', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ source_url: url, title }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          alert('추가 실패: ' + (data.error || r.status));
+          return;
+        }
+        alert(data.message || '추가되었습니다.');
+        addForm.style.display = 'none';
+        await load();
+      } catch (e) {
+        alert('연결 실패: ' + (e.message || ''));
+      } finally {
+        btnAddSubmit.disabled = false;
+      }
+    });
     btnCrawl.addEventListener('click', async () => {
       btnCrawl.disabled = true;
       btnCrawl.textContent = '수집 중…';

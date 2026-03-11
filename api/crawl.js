@@ -2,7 +2,11 @@
  * cheerio 미사용: 정규식으로 HTML 파싱 → 타임아웃·크래시 방지, 항상 JSON 응답
  */
 const BASE = 'https://www.mule.co.kr';
-const CORS_PROXY = 'https://corsproxy.io/?url=';
+const PROXIES = [
+  { name: '직접', url: (u) => u, headers: true },
+  { name: 'corsproxy', url: (u) => 'https://corsproxy.io/?url=' + encodeURIComponent(u), headers: false },
+  { name: 'allorigins', url: (u) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u), headers: false },
+];
 
 /** 뮬 악기장터 '왼손' 검색 + 일렉기타 카테고리 (실제 검색 URL) */
 const MULE_LEFTY_SEARCH =
@@ -104,13 +108,13 @@ const BROWSER_HEADERS = {
   Pragma: 'no-cache',
 };
 
-async function fetchOne(url, useProxy = false) {
-  const target = useProxy ? CORS_PROXY + encodeURIComponent(url) : url;
+async function fetchOne(url, proxy) {
+  const target = proxy.url(url);
   const c = new AbortController();
-  const t = setTimeout(() => c.abort(), 8000);
+  const t = setTimeout(() => c.abort(), 12000);
   try {
     const r = await fetch(target, {
-      headers: useProxy ? {} : BROWSER_HEADERS,
+      headers: proxy.headers ? BROWSER_HEADERS : {},
       signal: c.signal,
     });
     if (!r.ok) return null;
@@ -149,14 +153,16 @@ export default {
       let err = null;
       let lastHtmlLength = 0;
       let lastSnippet = '';
+      let triedProxy = '';
 
-      for (const useProxy of [false, true]) {
+      for (const proxy of PROXIES) {
         try {
-          const html = await fetchOne(MULE_LEFTY_SEARCH, useProxy);
+          const html = await fetchOne(MULE_LEFTY_SEARCH, proxy);
           if (html && html.length > 100) {
             lastHtmlLength = html.length;
             lastSnippet = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
             all = extractLinks(html, '뮬(mule)');
+            triedProxy = proxy.name;
             if (all.length > 0) break;
           }
         } catch (e) {
@@ -200,6 +206,7 @@ export default {
           htmlLength: lastHtmlLength,
           snippet: lastSnippet || '(없음)',
           fetchError: err ? (err.message || String(err)) : null,
+          triedProxies: PROXIES.map((p) => p.name).join(', '),
         };
       }
       return json(body, 200);
