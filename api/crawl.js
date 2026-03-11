@@ -16,35 +16,63 @@ function json(body, status = 200) {
   });
 }
 
-const LEFTY = /왼손|레프티|lefty|좌손/i;
+const SELL_BASE = `${BASE}/bbs/market/sell`;
 
-/** HTML에서 href="...idx=..." 추출 후, 해당 위치 근처에서 링크 텍스트 찾기 */
-function extractLinks(html, sourceLabel, requireLefty = false) {
+/**
+ * 뮬 중고장터 구조 (확인된 패턴):
+ * - [가격+제목 [n]](https://.../sell?v=v&idx=숫자&...)
+ * - HTML: <a href=".../sell?v=v&idx=숫자...">가격+제목 [n]</a>
+ * 서버가 받는 응답이 SPA/다른 구조일 수 있으므로 여러 전략 사용.
+ */
+function extractLinks(html, sourceLabel) {
   const items = [];
   const seen = new Set();
 
-  const hrefRe = /href\s*=\s*["']([^"']*idx=(\d+)[^"']*)["']/gi;
+  // 전략 1: 마크다운 스타일 [텍스트](url) — 일부 변환기/응답 형식
+  const mdRe = /\[([^\]]+)\]\((https?:\/\/[^)]*\/bbs\/market\/sell[^)]*idx=\d+[^)]*)\)/g;
   let m;
-  while ((m = hrefRe.exec(html)) !== null) {
-    let href = m[1].replace(/&amp;/g, '&');
-    const link = href.startsWith('http') ? href : new URL(href, BASE).href;
-    if (!link.includes('mule.co.kr/bbs/') || seen.has(link)) continue;
+  while ((m = mdRe.exec(html)) !== null) {
+    let link = m[2].replace(/&amp;/g, '&');
+    if (!link.startsWith('http')) link = new URL(link, BASE).href;
+    if (seen.has(link)) continue;
     seen.add(link);
-
-    const afterHref = html.slice(m.index + m[0].length);
-    const closeAngle = afterHref.indexOf('>');
-    const closeA = afterHref.indexOf('</a>', closeAngle);
-    let raw = closeAngle >= 0 && closeA > closeAngle
-      ? afterHref.slice(closeAngle + 1, closeA)
-      : '';
-    raw = raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-    if (requireLefty && raw && !LEFTY.test(raw)) continue;
-    if (!raw || raw.length < 1) raw = `뮬 매물 #${m[2] || ''}`;
-
+    let raw = (m[1] || '').replace(/\s+/g, ' ').trim();
+    if (!raw) raw = `뮬 매물`;
     const priceMatch = raw.match(/^([\d.,]+(?:만원|원)|-\s*)/);
     const price = priceMatch ? priceMatch[1].trim() : null;
     const title = (priceMatch ? raw.slice(priceMatch[0].length) : raw).replace(/\s*\[\d+\]\s*$/, '').trim() || raw;
     items.push({ title: title || raw, image_url: null, price, source_site: sourceLabel, source_url: link, posted_at: null });
+  }
+  if (items.length > 0) return items;
+
+  // 전략 2: HTML href="...idx=..." 그 다음 > 와 </a> 사이 텍스트
+  const hrefRe = /href\s*=\s*["']([^"']*idx=(\d+)[^"']*)["']/gi;
+  while ((m = hrefRe.exec(html)) !== null) {
+    let href = m[1].replace(/&amp;/g, '&');
+    const link = href.startsWith('http') ? href : new URL(href, BASE).href;
+    if (!link.includes('/bbs/market/sell') || seen.has(link)) continue;
+    seen.add(link);
+    const after = html.slice(m.index + m[0].length);
+    const gt = after.indexOf('>');
+    const endA = after.indexOf('</a>', gt);
+    let raw = gt >= 0 && endA > gt ? after.slice(gt + 1, endA) : '';
+    raw = raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!raw) raw = `뮬 매물 #${m[2]}`;
+    const priceMatch = raw.match(/^([\d.,]+(?:만원|원)|-\s*)/);
+    const price = priceMatch ? priceMatch[1].trim() : null;
+    const title = (priceMatch ? raw.slice(priceMatch[0].length) : raw).replace(/\s*\[\d+\]\s*$/, '').trim() || raw;
+    items.push({ title: title || raw, image_url: null, price, source_site: sourceLabel, source_url: link, posted_at: null });
+  }
+  if (items.length > 0) return items;
+
+  // 전략 3: 페이지 어디든 market/sell...idx=숫자 등장하면 URL 생성 (SPA/다른 구조 대비)
+  const idxRe = /(?:market\/sell|sell\?)[^"'\s]*idx=(\d+)/gi;
+  while ((m = idxRe.exec(html)) !== null) {
+    const id = m[1];
+    const link = `${SELL_BASE}?v=v&idx=${id}&page=&qf=&q=`;
+    if (seen.has(link)) continue;
+    seen.add(link);
+    items.push({ title: `뮬 매물 #${id}`, image_url: null, price: null, source_site: sourceLabel, source_url: link, posted_at: null });
   }
   return items;
 }
@@ -97,8 +125,8 @@ export default {
       for (const useProxy of [false, true]) {
         try {
           const html = await fetchOne(crawlUrl, useProxy);
-          if (html && html.length > 1000) {
-            all = extractLinks(html, '뮬(mule)', false);
+          if (html && html.length > 500) {
+            all = extractLinks(html, '뮬(mule)');
             if (all.length > 0) break;
           }
         } catch (e) {
