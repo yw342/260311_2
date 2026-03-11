@@ -18,24 +18,33 @@ function json(body, status = 200) {
 
 const LEFTY = /왼손|레프티|lefty|좌손/i;
 
-/** HTML에서 a href="...idx=..." 와 링크 텍스트 추출 (cheerio 없이) */
-function extractLinks(html, sourceLabel) {
+/** HTML에서 href="...idx=..." 추출 후, 해당 위치 근처에서 링크 텍스트 찾기 */
+function extractLinks(html, sourceLabel, requireLefty = false) {
   const items = [];
   const seen = new Set();
-  const re = /<a\s[^>]*href=["']([^"']*idx=\d+[^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi;
+
+  const hrefRe = /href\s*=\s*["']([^"']*idx=(\d+)[^"']*)["']/gi;
   let m;
-  while ((m = re.exec(html)) !== null) {
+  while ((m = hrefRe.exec(html)) !== null) {
     let href = m[1].replace(/&amp;/g, '&');
     const link = href.startsWith('http') ? href : new URL(href, BASE).href;
     if (!link.includes('mule.co.kr/bbs/') || seen.has(link)) continue;
     seen.add(link);
-    const raw = (m[2] || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-    if (!raw || raw.length < 2) continue;
-    if (!LEFTY.test(raw)) continue;
+
+    const afterHref = html.slice(m.index + m[0].length);
+    const closeAngle = afterHref.indexOf('>');
+    const closeA = afterHref.indexOf('</a>', closeAngle);
+    let raw = closeAngle >= 0 && closeA > closeAngle
+      ? afterHref.slice(closeAngle + 1, closeA)
+      : '';
+    raw = raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    if (requireLefty && raw && !LEFTY.test(raw)) continue;
+    if (!raw || raw.length < 1) raw = `뮬 매물 #${m[2] || ''}`;
+
     const priceMatch = raw.match(/^([\d.,]+(?:만원|원)|-\s*)/);
     const price = priceMatch ? priceMatch[1].trim() : null;
     const title = (priceMatch ? raw.slice(priceMatch[0].length) : raw).replace(/\s*\[\d+\]\s*$/, '').trim() || raw;
-    items.push({ title, image_url: null, price, source_site: sourceLabel, source_url: link, posted_at: null });
+    items.push({ title: title || raw, image_url: null, price, source_site: sourceLabel, source_url: link, posted_at: null });
   }
   return items;
 }
@@ -89,7 +98,7 @@ export default {
         try {
           const html = await fetchOne(crawlUrl, useProxy);
           if (html && html.length > 1000) {
-            all = extractLinks(html, '뮬(mule)');
+            all = extractLinks(html, '뮬(mule)', false);
             if (all.length > 0) break;
           }
         } catch (e) {
