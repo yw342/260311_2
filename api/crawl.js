@@ -143,10 +143,12 @@ const BROWSER_HEADERS = {
   Pragma: 'no-cache',
 };
 
+const FETCH_TIMEOUT_MS = 9000; // 병렬 1회 대기 (Vercel 10초 제한 고려)
+
 async function fetchOne(url, proxy) {
   const target = proxy.url(url);
   const c = new AbortController();
-  const t = setTimeout(() => c.abort(), 12000);
+  const t = setTimeout(() => c.abort(), FETCH_TIMEOUT_MS);
   try {
     const r = await fetch(target, {
       headers: proxy.headers ? BROWSER_HEADERS : {},
@@ -157,6 +159,23 @@ async function fetchOne(url, proxy) {
   } finally {
     clearTimeout(t);
   }
+}
+
+/** 여러 프록시를 동시에 시도해, 가장 빨리 성공한 결과 반환 */
+async function fetchFirstValid(url) {
+  const results = await Promise.allSettled(
+    PROXIES.map(async (proxy) => {
+      const html = await fetchOne(url, proxy);
+      return { html, name: proxy.name };
+    })
+  );
+  for (const r of results) {
+    if (r.status === 'fulfilled' && r.value.html && r.value.html.length > 100) {
+      return { html: r.value.html, proxyName: r.value.name };
+    }
+  }
+  const lastRejection = results.find((r) => r.status === 'rejected');
+  throw lastRejection?.reason || new Error('모든 시도 실패');
 }
 
 export default {
@@ -190,19 +209,14 @@ export default {
       let lastSnippet = '';
       let triedProxy = '';
 
-      for (const proxy of PROXIES) {
-        try {
-          const html = await fetchOne(MULE_LEFTY_SEARCH, proxy);
-          if (html && html.length > 100) {
-            lastHtmlLength = html.length;
-            lastSnippet = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
-            all = extractLinks(html, '뮬(mule)');
-            triedProxy = proxy.name;
-            if (all.length > 0) break;
-          }
-        } catch (e) {
-          err = e;
-        }
+      try {
+        const { html, proxyName } = await fetchFirstValid(MULE_LEFTY_SEARCH);
+        lastHtmlLength = html.length;
+        lastSnippet = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
+        triedProxy = proxyName;
+        all = extractLinks(html, '뮬(mule)');
+      } catch (e) {
+        err = e;
       }
 
       const seen = new Set();
