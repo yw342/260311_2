@@ -1,6 +1,5 @@
 import { getSupabase } from '../lib/supabase.js';
 import { setCors } from '../lib/res.js';
-import * as cheerio from 'cheerio';
 
 const BASE = 'https://www.mule.co.kr';
 const MULE_MARKET = `${BASE}/bbs/market`;
@@ -50,7 +49,7 @@ async function fetchMulePage(url, useProxy = false) {
 }
 
 /** 뮬 악기장터/뮬인: 링크 목록 형태 [가격+제목](url) 에 맞춰 추출 */
-function extractMuleListFromLinks(html, sourceLabel) {
+function extractMuleListFromLinks(html, sourceLabel, cheerio) {
   const $ = cheerio.load(html, { decodeEntities: false });
   const items = [];
   const seen = new Set();
@@ -87,8 +86,8 @@ function filterLeftyOnly(items) {
   return items.filter((i) => LEFTY_KEYWORDS.test(i.title));
 }
 
-function extractMuleList(html, sourceLabel) {
-  const fromLinks = extractMuleListFromLinks(html, sourceLabel);
+function extractMuleList(html, sourceLabel, cheerio) {
+  const fromLinks = extractMuleListFromLinks(html, sourceLabel, cheerio);
   if (fromLinks.length > 0) {
     return filterLeftyOnly(fromLinks);
   }
@@ -141,7 +140,7 @@ function extractMuleList(html, sourceLabel) {
   return filterLeftyOnly(items);
 }
 
-async function crawlMule() {
+async function crawlMule(cheerio) {
   const out = [];
   const q = '왼손';
   const urls = [
@@ -157,7 +156,7 @@ async function crawlMule() {
       try {
         const html = await fetchMulePage(url, useProxy);
         if (html && html.length > 1000) {
-          const list = extractMuleList(html, '뮬(mule)');
+          const list = extractMuleList(html, '뮬(mule)', cheerio);
           for (const i of list) {
             if (!seen.has(i.source_url)) {
               seen.add(i.source_url);
@@ -173,10 +172,22 @@ async function crawlMule() {
 }
 
 function sendJson(res, status, body) {
-  setCors(res);
-  res.status(status);
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.end(JSON.stringify(body));
+  try {
+    if (typeof res.setHeader === 'function') {
+      setCors(res);
+      res.status(status);
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.end(JSON.stringify(body));
+    } else {
+      res.status(status).json(body);
+    }
+  } catch (err) {
+    try {
+      res.status(status).json(body);
+    } catch (_) {
+      res.status(500).end(JSON.stringify({ error: '응답 전송 실패' }));
+    }
+  }
 }
 
 export default async function handler(req, res) {
@@ -198,10 +209,20 @@ export default async function handler(req, res) {
       });
     }
 
+    let cheerio;
+    try {
+      const mod = await import('cheerio');
+      cheerio = { load: mod.load || mod.default };
+    } catch (e) {
+      return sendJson(res, 500, {
+        error: 'cheerio 로드 실패. ' + (e && e.message ? e.message : ''),
+      });
+    }
+
     let all = [];
     let crawlError = null;
     try {
-      all = await crawlMule();
+      all = await crawlMule(cheerio);
     } catch (e) {
       crawlError = e;
       console.error('Crawl mule error', e);
